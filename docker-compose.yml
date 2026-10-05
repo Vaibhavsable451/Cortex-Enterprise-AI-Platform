@@ -1,0 +1,36 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80"]
+    volumes: ["./docker/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [frontend, backend]
+  frontend:
+    build: { context: ., dockerfile: docker/Dockerfile.frontend }
+    environment: { API_URL: "http://backend:8000" }
+    depends_on: [backend]
+  backend:
+    build: { context: ., dockerfile: docker/Dockerfile.backend }
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql+pymysql://app:apppass@mysql:3306/audit
+    volumes: ["uploads:/app/data/uploads", "hf_cache:/home/app/.cache"]
+    depends_on:
+      mysql: { condition: service_healthy }
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: audit
+      MYSQL_USER: app
+      MYSQL_PASSWORD: apppass
+    volumes: ["mysql_data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-prootpass"]
+      interval: 5s
+      retries: 20
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.16.2
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    ports: ["5000:5000"]
+    volumes: ["mlflow_data:/mlflow"]
+volumes: { uploads: {}, hf_cache: {}, mysql_data: {}, mlflow_data: {} }

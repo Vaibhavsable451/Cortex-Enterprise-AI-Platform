@@ -1,0 +1,23 @@
+# ==========================================
+# Deep Learning / LLM Fine-Tuning
+# Python 3.11
+# ==========================================
+
+# ---------- PyTorch ----------
+torch==2.14.1
+
+# ---------- Hugging Face ----------
+transformers==5.18.0
+datasets==5.0.1
+peft==0.21.2
+accelerate==1.15.0
+
+# ---------- Quantization / QLoRA ----------
+bitsandbytes==0.50.2
+
+# ---------- Scientific Computing ----------
+scipy==1.17.1
+
+# ---------- Visualization ----------
+matplotlib==3.11.2
+seaborn==0.13.2

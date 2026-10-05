@@ -1,0 +1,68 @@
+name: CI/CD
+on:
+  push: { branches: [main] }
+  pull_request:
+env:
+  AWS_REGION: us-east-1
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install ruff pytest PyJWT python-dotenv
+      - run: ruff check .
+      - run: pytest -q tests
+
+  build-scan-push:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: { id-token: write, contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build images
+        run: |
+          docker build -f docker/Dockerfile.backend  -t ${{ steps.ecr.outputs.registry }}/cortex-backend:${{ github.sha }} .
+          docker build -f docker/Dockerfile.frontend -t ${{ steps.ecr.outputs.registry }}/cortex-frontend:${{ github.sha }} .
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: ${{ steps.ecr.outputs.registry }}/cortex-backend:${{ github.sha }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Push
+        run: |
+          docker push ${{ steps.ecr.outputs.registry }}/cortex-backend:${{ github.sha }}
+          docker push ${{ steps.ecr.outputs.registry }}/cortex-frontend:${{ github.sha }}
+
+  deploy:
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Deploy to EC2 over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/cortex && git pull
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.ecr.outputs.registry }}
+            docker compose pull || true
+            docker compose up -d --build
